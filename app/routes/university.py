@@ -31,14 +31,12 @@ def get_university(university_id: int):
 def create_university():
     try:
         data = request.get_json()
-        if not data or 'name' not in data:
-            abort(400, description="Invalid request: 'name' is required")
+        if not data or 'name' not in data or 'location' not in data :
+            abort(400, description="Invalid request: 'name', 'location',' are required")
 
         university = university_service.create_university(
             name=data['name'],
-            location=data.get('location'),
-            minscore=data.get('minscore'),
-            admin_id=data.get('admin_id')
+            location=data['location'],
         )
         if university:
             return jsonify(university.__dict__), 201
@@ -46,6 +44,38 @@ def create_university():
             abort(500, description="Failed to create university")
     except Exception as e:
         abort(500, description=f"An error occurred while creating the university: {str(e)}")
+
+# Update a university
+@university_bp.route('/<int:university_id>', methods=['PUT'])
+def update_university(university_id: int):
+    try:
+        data = request.get_json()
+        if not data:
+            abort(400, description="Invalid request: No data provided")
+
+        university = university_service.update_university(
+            university_id=university_id,
+            name=data.get('name'),
+            location=data.get('location'),
+        )
+        if university:
+            return jsonify(university.__dict__)
+        else:
+            abort(404, description="University not found or update failed")
+    except Exception as e:
+        abort(500, description=f"An error occurred while updating the university: {str(e)}")
+
+# Delete a university
+@university_bp.route('/<int:university_id>', methods=['DELETE'])
+def delete_university(university_id: int):
+    try:
+        success = university_service.delete_university(university_id)
+        if success:
+            return jsonify({"message": "University deleted successfully"}), 200
+        else:
+            abort(404, description="University not found")
+    except Exception as e:
+        abort(500, description=f"An error occurred while deleting the university: {str(e)}")
 
 # Get all students for a specific university
 @university_bp.route('/<int:university_id>/students', methods=['GET'])
@@ -82,3 +112,18 @@ def get_university_grades(university_id: int):
         return jsonify([grade.__dict__ for grade in grades])
     except Exception as e:
         abort(500, description=f"An error occurred while fetching grades: {str(e)}")
+
+
+# Get university by ID with students, their grades, and majors
+@university_bp.route('/<int:university_id>/details', methods=['GET'])
+def get_university_details(university_id: int):
+    try:
+        # Fetch university details with students, grades, and majors
+        university_details = university_service.get_university_details(university_id)
+
+        if university_details:
+            return jsonify(university_details), 200
+        else:
+            abort(404, description="University not found or no data available")
+    except Exception as e:
+        abort(500, description=f"An error occurred: {str(e)}")
