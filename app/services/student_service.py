@@ -1,8 +1,14 @@
 from datetime import datetime
-from typing import List, Optional
-from app.config import Config
-from app.models.database import Student, Grade, Activity
+from typing import List, Optional, Dict
 
+from sqlalchemy.connectors import asyncio
+
+from app.config import Config
+from app.models.database import Student, Grade, Activity,Universities,Major
+from app.decision_making. university_scoring_system import (
+    business_admin_scoring, accounting_scoring, finance_scoring,
+    computer_science_scoring, computer_engineering_scoring, mechanics_scoring
+)
 
 class StudentService:
     def __init__(self):
@@ -53,63 +59,131 @@ class StudentService:
         result = self.supabase.table('student').delete().eq('id', student_id).execute()
         return len(result.data) > 0
 
-    async def evaluate_student(
-                self,
-                student_id: int,
-                grades: List[Grade],
-                location: str,
-                activities: List[Activity],
-                leadership_position: bool,
-                major_name : str
-        ) -> dict:
-            try:
-                # Update student's location and leadership position
-                update_data = {
-                    'location': location,
-                    'leadership_position': leadership_position
-                }
-                self.supabase.table('student').update(update_data).eq('id', student_id).execute()
+    async def get_student_with_grades(self, student_id: int) -> Optional[Dict]:
+        """
+        Fetch a student by their ID along with their list of grades.
 
-                # Save grades to the database
-                for grade in grades:
-                    grade_data = {
-                        'student_id': student_id,
-                        'course_name': grade.course_name,
-                        'grade_value': grade.grade_value,
-                        'semester': grade.semester
-                    }
-                    self.supabase.table('grade').insert(grade_data).execute()
+        Returns:
+            A dictionary containing the student's details and their grades.
+            Example:
+            {
+                "student": { ...student details... },
+                "grades": [ ...list of grades... ]
+            }
+        """
+        try:
+            # Fetch the student by ID
+            student_result = self.supabase.table('student').select('*').eq('id', student_id).execute()
+            if not student_result.data:
+                return None  # Student not found
 
-                # Save activities to the database and link them to the student
-                for activity in activities:
-                    # Save the activity
-                    activity_data = {
-                        'activity_name': activity.activity_name,
-                        'activity_date': activity.activity_date,
-                        'description': activity.description
-                    }
-                    activity_result = self.supabase.table('activity').insert(activity_data).execute()
-                    activity_id = activity_result.data[0]['id']
+            student = Student(**student_result.data[0])
 
-                    # Link the activity to the student
-                    student_activity_data = {
-                        'student_id': student_id,
-                        'activity_id': activity_id
-                    }
-                    self.supabase.table('student_activity').insert(student_activity_data).execute()
-                    # Get all majors with the given name
-                    majors_result = self.supabase.table('major').select('university_id').ilike('name',
-                                                                                               f'%{major_name}%').execute()
-                    university_ids = [major['university_id'] for major in majors_result.data]
+            # Fetch all grades for the student
+            grades_result = self.supabase.table('grade').select('*').eq('student_id', student_id).execute()
+            grades = [Grade(**grade) for grade in grades_result.data]
 
-                    # Get universities with the filtered IDs
-                    universities_result = self.supabase.table('university').select('*').in_('id',
-                                                                                            university_ids).execute()
+            # Combine student and grades into a single response
+            return {
+                "student": student.__dict__,
+                "grades": [grade.__dict__ for grade in grades]
+            }
+        except Exception as e:
+            print(f"Error fetching student with grades: {e}")
+            return None
 
+    async def evaluate_student(self, student_id: int, major_name: str, student_activities: List[Dict]) -> Dict:
+        try:
+            # Fetch student details
+            student_result = self.supabase.table('student').select('*').eq('id', student_id).execute()
+            if not student_result.data:
+                return {"error": "Student not found"}
 
+            student = Student(**student_result.data[0])
 
+            # Fetch student grades
+            grades_result = self.supabase.table('grade').select('*').eq('student_id', student_id).execute()
+            grades = {grade['course_name']: grade['grade_value'] for grade in grades_result.data}
 
-                return {"message": "Student evaluation completed successfully"}
-            except Exception as e:
-                print(f"Error evaluating student: {e}")
-                return {"error": str(e)}
+            # Use the provided student_activities instead of fetching from the database
+            activities = student_activities
+
+            # Fetch all universities
+            university_result = self.supabase.table('universities').select('*').execute()
+            if not university_result.data:
+                return {"error": "No universities found"}
+
+            # Fetch major details
+            major_result = self.supabase.table('majors').select('*').eq('name', major_name).execute()
+            if not major_result.data:
+                return {"error": "Major not found"}
+
+            major = Major(**major_result.data[0])
+
+            # Determine the scoring function based on the major
+            scoring_functions = {
+                "Business Administration": business_admin_scoring,
+                "Accounting": accounting_scoring,
+                "Finance": finance_scoring,
+                "Computer Science": computer_science_scoring,
+                "Computer Engineering": computer_engineering_scoring,
+                "Mechanics": mechanics_scoring
+            }
+
+            scoring_function = scoring_functions.get(major_name)
+            if not scoring_function:
+                return {"error": "Scoring function not found for the major"}
+
+            # Fetch all university-major relationships for the given major
+            university_major_result = self.supabase.table('university_major') \
+                .select('university_id, major_id, minimumscore') \
+                .eq('major_id', major.major_id) \
+                .execute()
+
+            # Create a dictionary to map university_id to minimum score
+            university_min_scores = {
+                um['university_id']: um['minimumscore']
+                for um in university_major_result.data
+            }
+
+            # List to store matching universities
+            matching_universities = []
+
+            # Iterate over all universities
+            for university_data in university_result.data:
+                university = Universities(**university_data)
+
+                # Check if the major is offered at the university
+                if university.university_id not in university_min_scores:
+                    continue  # Major not offered at this university
+
+                # Get the minimum score for the major at this university
+                min_score = university_min_scores[university.university_id]
+
+                # Calculate the student's score for this university
+                student_score = scoring_function(grades, activities, student.location, university.location)
+
+                # Check if the student meets the minimum score
+                meets_criteria = student_score >= min_score
+
+                # Add the university to the matching list
+                matching_universities.append({
+                    "university_id": university.university_id,
+                    "university_name": university.name,
+                    "location": university.location,
+                    "student_score": student_score,  # Adjusted score
+                    "min_score_required": min_score,
+                    "meets_criteria": meets_criteria
+                })
+
+            # Sort matching universities by student score (descending order)
+            matching_universities.sort(key=lambda x: x['student_score'], reverse=True)
+
+            return {
+                "student_id": student_id,
+                "major_name": major_name,
+                "matching_universities": matching_universities
+            }
+        except Exception as e:
+            print(f"Error evaluating student: {e}")
+            return {"error": str(e)}

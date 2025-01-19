@@ -11,19 +11,25 @@ class Admin:
     created_at: datetime
 
 @dataclass
-class University:
-    id: int
+class Universities:
+    university_id: int
     name: str
-    minscore : int
-    location: Optional[str] = None
-    admin_id: Optional[int] = None  # References Admin.id
+    location: str
     created_at: Optional[datetime] = None
 
 @dataclass
 class Major:
-    id: int
+    major_id: int
     name: str
-    university_id: int  # References University.id
+    created_at: Optional[datetime] = None
+
+@dataclass
+class UniversityMajor:
+    id: int
+    university_id: int  # References University.university_id
+    major_id: int  # References Major.major_id
+    maxCapacity: int
+    minimumScore: int
     created_at: Optional[datetime] = None
 
 @dataclass
@@ -34,7 +40,7 @@ class Student:
     email: str
     password_hash: Optional[str] = None
     date_of_birth: Optional[datetime] = None
-    university_id: Optional[int] = None  # References University.id
+    university_id: Optional[int] = None  # References University.university_id
     location: Optional[str] = None
     leadership_position: Optional[bool] = False
     created_at: Optional[datetime] = None
@@ -54,6 +60,7 @@ class Activity:
     activity_name: str
     activity_date: Optional[datetime] = None
     description: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 @dataclass
 class StudentActivity:

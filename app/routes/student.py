@@ -81,24 +81,30 @@ async def delete_student(student_id: int):
 @student_bp.route('/<int:student_id>/evaluate', methods=['POST'])
 async def evaluate_student(student_id: int):
     data = request.get_json()
-    if not data or 'grades' not in data or 'location' not in data or 'activities' not in data or 'leadership_position' not in data:
-        abort(400, description="Invalid request: 'grades', 'location', 'activities', and 'leadership_position' are required")
-
-    # Convert grades and activities to dataclass objects
-    grades = [[Grade(**grade) for grade in data['grades']]]
-    activities = [Activity(**activity) for activity in data['activities']]
+    if not data or 'majorName' not in data or 'student_activities' not in data:
+        abort(400, description="Invalid request: 'majorName' and 'student_activities' are required")
 
     result = await student_service.evaluate_student(
         student_id=student_id,
-        grades=grades,
-        location=data['location'],
-        activities=activities,
-        leadership_position=data['leadership_position'],
-        major_name=data['major_name']
+        major_name=data['majorName'],
+        student_activities=data['student_activities']  # Pass activities from the request
     )
 
     if 'error' in result:
         abort(500, description=result['error'])
     else:
         return jsonify(result), 200
+
+@student_bp.route('/<int:student_id>/grades', methods=['GET'])
+async def get_student_with_grades(student_id: int):
+    try:
+        # Fetch the student and their grades
+        student_with_grades = await  student_service.get_student_with_grades(student_id)
+
+        if student_with_grades:
+            return jsonify(student_with_grades), 200
+        else:
+            abort(404, description="Student not found or no grades available")
+    except Exception as e:
+        abort(500, description=f"An error occurred: {str(e)}")
 
